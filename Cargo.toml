@@ -1,0 +1,10 @@
+[package]
+name = "roguelike_p"
+version = "0.1.0"
+authors = ["Von Mbah <vonchude@gmail.com"]
+edition = "2018"
+
+[dependencies]
+tcod = "0.14.0"
+rand = "0.3.9"
+
