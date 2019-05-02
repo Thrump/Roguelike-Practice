@@ -2,6 +2,10 @@ extern crate rand;
 use rand::Rng;
 
 use std::cmp;
+use crate::place_objects;
+use crate::Object;
+
+const PLAYER: usize = 0;
 
 
 //Map size
@@ -69,13 +73,12 @@ pub fn create_room(room: Rect, map: &mut Map){
 
 pub type Map = Vec<Vec<Tile>>;
 
-pub fn make_map() -> (Map, (i32, i32)) {
+pub fn make_map(objects: &mut Vec<Object>) -> Map {
     //fill map with "blocked tiles"
     let mut map = vec![vec![Tile::wall(); MAP_HEIGHT as usize]; MAP_WIDTH as usize];
 
     let mut rooms = vec![];
 
-    let mut starting_position = (0,0);
     for _ in 0..MAX_ROOMS {
         // random width and height
         let w = rand::thread_rng().gen_range(ROOM_MIN_SIZE, ROOM_MAX_SIZE + 1);
@@ -92,15 +95,17 @@ pub fn make_map() -> (Map, (i32, i32)) {
             // means no intersections, so this room is valid
 
             //"paint" it to the map's tiles
-
             create_room(new_room, &mut map);
+
+            //add some content to this room, such as monsters
+            place_objects(new_room, &map, objects);
 
             //center coordinates of the new room, will be useful later
             let (new_x, new_y) = new_room.center();
 
             if rooms.is_empty() {
                 //starting room
-                starting_position = (new_x, new_y);
+                objects[PLAYER].set_pos(new_x, new_y);
             }else {
                 // all rooms after the first;
                 //connect it to the previous room with a tunnel
@@ -126,7 +131,7 @@ pub fn make_map() -> (Map, (i32, i32)) {
             rooms.push(new_room);
         }
     }
-    (map, starting_position)
+    map
 }
 
 fn create_h_tunnel(x1: i32, x2: i32, y:i32, map: &mut Map) {

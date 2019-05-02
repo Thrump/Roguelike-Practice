@@ -5,6 +5,7 @@ use tcod::{colors, Color};
 use tcod::input::{Key, KeyCode::*};
 use roguelike_p::map::*;
 use roguelike_p::*;
+use PlayerAction::*;
 use tcod::map::{Map as FovMap, FovAlgorithm};
 
 
@@ -17,6 +18,7 @@ const FOV_ALGO: FovAlgorithm = FovAlgorithm::Basic;
 const FOV_LIGHT_WALLS: bool = true;
 const TORCH_RADIUS: i32 = 10;
 
+pub const PLAYER: usize = 0;
 
 
 
@@ -28,13 +30,11 @@ const COLOR_LIGHT_GROUND: Color = Color { r: 200, g: 180, b: 50};
 
 
 
-
-
 fn render_all(root: &mut Root, con: &mut Offscreen, objects: &[Object], map: &mut Map,
                 fov_map: &mut FovMap, fov_recompute: bool){
 
     if fov_recompute {
-        let player = &objects[0];
+        let player = &objects[PLAYER];
         fov_map.compute_fov(player.x, player.y, TORCH_RADIUS, FOV_LIGHT_WALLS, FOV_ALGO);
     }
 
@@ -63,8 +63,6 @@ fn render_all(root: &mut Root, con: &mut Offscreen, objects: &[Object], map: &mu
 
         }
     }
-
-
     //draw all objects in the list
     for object in objects {
         if fov_map.is_in_fov(object.x, object.y) {
@@ -72,8 +70,6 @@ fn render_all(root: &mut Root, con: &mut Offscreen, objects: &[Object], map: &mu
         }
 
     }
-
-
     blit(con, (0,0), (SCREEN_WIDTH,SCREEN_HEIGHT), root, (0,0), 1.0, 1.0);
 
 }
@@ -93,17 +89,14 @@ fn main() {
 
     let mut con = Offscreen::new(SCREEN_WIDTH, SCREEN_HEIGHT);
 
-    //generate map (at this point its not drawn to the screen
-    let (mut map, (player_x, player_y)) = make_map();
     // create an object representing the player
-    let player = Object::new(player_x, player_y, '#', colors::LIGHTER_BLUE);
+    let mut player = Object::new(0, 0, '#', "player",  colors::LIGHTER_BLUE, true);
+    player.alive = true;
+    // the list of objects
+    let mut objects= vec![player];
 
-    //create an NPC
-    let npc = Object::new(SCREEN_WIDTH / 2 - 10 , SCREEN_HEIGHT / 2 + 5, '#', colors::LIGHT_RED);
-
-   // the list of objects
-    let mut objects= [player, npc];
-
+    //generate map (at this point its not drawn to the screen
+    let mut map = make_map(&mut objects);
 
 
 
@@ -126,40 +119,86 @@ fn main() {
 
         //render the screen
 
-        let fov_recompute = previous_player_position != (objects[0].x, objects[0].y);
+        let fov_recompute = previous_player_position != (objects[PLAYER].pos());
         render_all(&mut root, &mut con, &objects, &mut map, &mut fov_map, fov_recompute);
 
         //will draw everything on the window at once
         root.flush();
 
         //handles the keys and exit the game if needed
-        let player = &mut objects[0];
+        let player = &mut objects[PLAYER];
         previous_player_position = (player.x, player.y);
-        let exit = handle_keys(&mut root, player, &map);
-        if exit {
+        let player_action = handle_keys(&mut root, &mut objects, &map);
+        if player_action == PlayerAction::Exit{
             break;
+        }
+        //let monsters take their turn
+        if objects[PLAYER].alive && player_action != PlayerAction::DidntTakeTurn {
+            for object in &objects {
+                //only if object is not player
+                if (object as *const _) != (&objects[PLAYER] as *const _) {
+                    println!("The {} growls!", object.name);
+                }
+            }
+        }
+
+    }
+
+}
+
+
+fn player_move_or_attack(dx: i32, dy: i32, map: &Map, objects: &mut [Object]){
+    //the coordinates the player is moving to/attacking
+    let x = objects[PLAYER].x + dx;
+    let y = objects[PLAYER].y + dy;
+
+    //try to find an attackable object there
+    let target_id = objects.iter().position(|object| {
+        object.pos() == (x,y)
+    });
+
+    //attack if target found, move otherwise
+    match target_id {
+        Some(target_id) => {
+            println!("The {} laughs at your puny efforts to attack him!", objects[target_id].name);
+        }
+        None => {
+            move_by(PLAYER, dx, dy, map, objects);
         }
     }
 
 }
 
-fn handle_keys(root: &mut Root, player: &mut Object, map: &Map) -> bool {
+fn handle_keys(root: &mut Root, objects: &mut [Object], map: &Map) -> PlayerAction {
     let key = root.wait_for_keypress(true);
 
-    match key {
-        Key {code: Enter, alt: true, ..} => {
+    let player_alive = objects[PLAYER].alive;
+    match (key, player_alive) {
+        (Key {code: Enter, alt: true, ..}, _) => {
             let fullscreen  = root.is_fullscreen();
             root.set_fullscreen(!fullscreen);
+            DidntTakeTurn
         }
-        Key {code: Escape, ..} => return true,
+        (Key {code: Escape, ..}, _) => return Exit,
         //movement keys
-        Key { code: Up, ..} => player.move_by(0, -1, map),
-        Key { code: Down, ..} => player.move_by(0, 1, map),
-        Key { code: Left, ..} => player.move_by(-1, 0, map),
-        Key { code: Right, ..} => player.move_by(1, 0, map),
-        _ => {},
+        (Key { code: Up, ..}, true) => {
+            player_move_or_attack( 0, -1, map, objects);
+            TookTurn
+        },
+        (Key { code: Down, ..}, true) => {
+            player_move_or_attack( 0, 1, map, objects);
+            TookTurn
+        },
+        (Key { code: Left, ..}, true) => {
+            player_move_or_attack( -1, 0, map, objects);
+            TookTurn
+        },
+        (Key { code: Right, ..}, true) => {
+            player_move_or_attack(1, 0, map, objects);
+            TookTurn
+        },
+        _ => DidntTakeTurn,
 
     }
-        false
 
 }
