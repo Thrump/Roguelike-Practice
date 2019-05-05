@@ -3,11 +3,11 @@ extern crate tcod;
 use tcod::console::*;
 use tcod::{colors, Color};
 use tcod::input::{Key, KeyCode::*};
-use roguelike_p::map::*;
+use roguelike_p::{map::*};
 use roguelike_p::*;
 use PlayerAction::*;
+use PLAYER;
 use tcod::map::{Map as FovMap, FovAlgorithm};
-
 
 //size of the window
 const SCREEN_WIDTH: i32 = 80;
@@ -18,16 +18,12 @@ const FOV_ALGO: FovAlgorithm = FovAlgorithm::Basic;
 const FOV_LIGHT_WALLS: bool = true;
 const TORCH_RADIUS: i32 = 10;
 
-pub const PLAYER: usize = 0;
-
-
 
 //wall and ground
 const COLOR_DARK_WALL: Color = Color {r: 50, g: 50, b: 50};
 const COLOR_LIGHT_WALL: Color = Color { r:130, g:110, b:50};
 const COLOR_DARK_GROUND: Color = Color { r: 20, g: 20, b: 20};
 const COLOR_LIGHT_GROUND: Color = Color { r: 200, g: 180, b: 50};
-
 
 
 fn render_all(root: &mut Root, con: &mut Offscreen, objects: &[Object], map: &mut Map,
@@ -62,20 +58,24 @@ fn render_all(root: &mut Root, con: &mut Offscreen, objects: &[Object], map: &mu
             }
 
         }
-    }
-    //draw all objects in the list
-    for object in objects {
-        if fov_map.is_in_fov(object.x, object.y) {
-            object.draw(con);
-        }
 
+
+    }
+
+    let mut to_draw: Vec<_> = objects.iter().filter(|o| fov_map.is_in_fov(o.x, o.y)).collect();
+    //sort so thatt non_blocking objects come first
+    to_draw.sort_by(|o1, o2| {o1.blocks.cmp(&o2.blocks)});
+    //draw the objects in the list
+    for object in &to_draw {
+        object.draw(con);
+    }
+
+    if let Some(fighter) = objects[PLAYER].fighter {
+        root.print_ex(1, SCREEN_HEIGHT - 2, BackgroundFlag::None, TextAlignment::Left, format!("HP: {}/{}", fighter.hp, fighter.max_hp));
     }
     blit(con, (0,0), (SCREEN_WIDTH,SCREEN_HEIGHT), root, (0,0), 1.0, 1.0);
 
 }
-
-
-
 
 
 fn main() {
@@ -92,6 +92,7 @@ fn main() {
     // create an object representing the player
     let mut player = Object::new(0, 0, '#', "player",  colors::LIGHTER_BLUE, true);
     player.alive = true;
+    player.fighter = Some(Fighter{max_hp:30, hp: 30, defense:2, power:5 , on_death: DeathCallBack::Player});
     // the list of objects
     let mut objects= vec![player];
 
@@ -134,18 +135,16 @@ fn main() {
         }
         //let monsters take their turn
         if objects[PLAYER].alive && player_action != PlayerAction::DidntTakeTurn {
-            for object in &objects {
-                //only if object is not player
-                if (object as *const _) != (&objects[PLAYER] as *const _) {
-                    println!("The {} growls!", object.name);
-                }
-            }
+           for id in 0..objects.len() {
+               if objects[id].ai.is_some() {
+                   ai_take_turn(id, &map, &mut objects, &fov_map);
+               }
+           }
         }
 
     }
 
 }
-
 
 fn player_move_or_attack(dx: i32, dy: i32, map: &Map, objects: &mut [Object]){
     //the coordinates the player is moving to/attacking
@@ -154,13 +153,14 @@ fn player_move_or_attack(dx: i32, dy: i32, map: &Map, objects: &mut [Object]){
 
     //try to find an attackable object there
     let target_id = objects.iter().position(|object| {
-        object.pos() == (x,y)
+        object.fighter.is_some() && object.pos() == (x, y)
     });
 
     //attack if target found, move otherwise
     match target_id {
         Some(target_id) => {
-            println!("The {} laughs at your puny efforts to attack him!", objects[target_id].name);
+            let (player, target) = mut_two(PLAYER, target_id, objects);
+            player.attack(target);
         }
         None => {
             move_by(PLAYER, dx, dy, map, objects);
